@@ -1,0 +1,1468 @@
+model CB
+
+class Date
+attributes
+    day: Integer init: 1
+    month: Integer init: 1
+    year: Integer init: 1901
+
+operations
+    /** Updates the attribute values */
+    initialise(d: Integer, m: Integer, y: Integer)
+    begin
+        self.day := d;
+        self.month := m;
+        self.year := y;
+    end
+    pre parametersHaveValidValues: isValid(d, m, y)
+    post attributesCorrectlyUpdatedAlt:
+        (if d = day@pre then day = day@pre else day = d endif) and
+            (if m = month@pre then month = month@pre else month = m endif) and
+                (if y = year@pre then year = year@pre else year = y endif)
+
+    /* Accessors */
+    getDay(): Integer = day
+    getMonth(): Integer = month
+    getYear(): Integer = year
+
+    /* Mutators - ***** Fill in your OCL expressions and pre- and
+                post-conditions for these  from the previous Modelling
+                session that asked you to write them. */
+    setDay(d: Integer)
+    setMonth(m: Integer)
+    setYear(y: Integer)
+
+    /** returns true if all the attributes are not null, false otherwise */
+    isInitialised(): Boolean =
+        day <> null and month <> null and year <> null
+
+    /** returns true if self is before d, , false otherwise */
+    before(d: Date): Boolean = true /* ***** Fill in your OCL expression
+                from  the previous Modelling session that asked you
+                to write it. */
+
+    /** returns true if self has the same values as d, false otherwise */
+    equals(d: Date): Boolean = day = d.day and month = d.month and year = d.year
+    pre bothAreInitialised: isInitialised() and d.isInitialised()
+    pre bothAreValid: isValid(day, month, year) and
+        isValid(d.day, d.month, d.year)
+    post returnValueConditions:
+        let
+            s = Set{day = d.day, month = d.month, year = d.month}
+        in
+            result =  s->excludes(false) /* true or flase will be in result */
+
+    /** returns true if self is after d, false otherwise */
+    after(d: Date): Boolean = not equals(d) and not before(d)
+
+    /** returns true if y is a leap year, false otherwise */
+    isLeapYear(y: Integer): Boolean =
+        if (y.mod(400)=0 or (y.mod(100)>0 and y.mod(4)=0))
+        then true
+        else false
+        endif
+    pre yearIsValid: y > 1900
+
+    dayValid(v: Integer): Boolean = v >= 1 and v <= 31
+
+    monthValid(v: Integer): Boolean =  v >= 1 and v <= 12
+
+    yearValid(v: Integer): Boolean = v > 1900
+
+    dayAndMonthValid(d: Integer, m: Integer): Boolean =
+        Set{4, 6, 9, 11}->includes(m) implies d < 31
+
+    febValid(d: Integer, y: Integer): Boolean =
+        (isLeapYear(y) implies d <= 29) and
+            (not isLeapYear(y) implies d <= 28)
+
+    isValid(d: Integer, m: Integer, y: Integer): Boolean =
+         dayValid(d) and monthValid(m) and yearValid(y) and
+            dayAndMonthValid(d, m) and (m = 2 implies febValid(d, y))
+
+constraints
+    inv dayValues: dayValid(day)
+    inv monthValues: monthValid(month)
+    inv yearValues: yearValid(year)
+    inv monthsWith30Days: dayAndMonthValid(day, month)
+    inv inLeapYearFebDaysCorrect: month = 2 implies febValid(day, year)
+end
+
+
+
+class DateTime < Date
+attributes
+    hour: Integer
+    minute: Integer
+    second: Integer
+end
+
+
+class User 
+attributes 
+   name: String
+   userName: String
+   age: Integer
+   email: String
+   password: String
+
+operations
+    inviteToGame(rUser:User)
+    begin
+        declare gameInvite: GameInvite;
+        gameInvite := new GameInvite();
+        gameInvite.initialiseInvite(rUser,self);
+    end
+    respondToGameInvite(gInvite:GameInvite,accept:Boolean)
+    begin
+        gInvite.setStatus(accept)
+    end
+        
+    initialisePreferences()
+    begin
+        declare search : Preference, status : Preference;
+        search := new Preference();
+        status := new Preference();
+        search.updateStatus(#Everyone,#Available);
+        insert (self,search) into sets;
+        status.updateStatus(#Everyone,#Available);
+        insert (self,search) into sets;
+    end
+    Block(username:String)
+    begin
+        declare block:Blocked,userToBeBlocked:User;
+        userToBeBlocked := self.CB.UserSearch(username);
+        block := new Blocked();
+        insert (self,block) into updatesBlockedStatus;
+        insert (userToBeBlocked,block) into recievesBStausUpdate;
+        block.isBlocked := true;
+    end
+
+    
+
+    pre UserMustExist: self.CB.UserSearch(username) <> null
+    pre UserMustNotBeThemSelf: self.userName <> username
+    pre UserMustNotAlreadyBeBlocked: updatedBlockStatus -> forAll(x| x.isBlocked = true and x.blocked.userName<>username)
+    post UserIsBlocked: updatedBlockStatus.blocked->includes(self.CB.UserSearch(username))
+end
+
+class Game < Subject
+attributes
+ timer: Integer
+ gameStatus: GameStatus
+ Draw: Boolean init: false
+ operations
+    
+    
+    initialiseGame()
+    begin 
+        declare
+        newBoard: Board,
+        rows: Sequence(Row),
+        columns: Sequence(Column),
+        colours: Sequence(Colour),
+        shades: Sequence(Shade),
+        turn: Integer,
+        square: Square;
+
+        newBoard := new Board();
+        insert (self,newBoard) into initialise;
+
+        rows := newBoard.getOrderedRows()->asSequence();
+        columns := newBoard.getOrderedColumns()->asSequence();
+        colours := Sequence{#Red,#White};
+        shades := Sequence{Shade::Red,Shade::White};
+
+        turn := 1;
+        for r in rows do 
+            for c in columns do
+                square := new Square();
+                square.row := r;
+                square.column := c;
+                square.shade :=  shades->at(turn);
+                insert (newBoard, square) into has;
+                turn := if turn = 1 then 2 else 1 endif;
+            end;
+            turn := if turn = 1 then 2 else 1 endif;
+        end;
+    end
+    createAndInsertPiece(board:Board,colour:Colour)
+    begin
+        declare redPRow: Sequence(Row), whitePRow: Sequence(Row), columns: Sequence(Column),piece:Piece, mp:MovePattern;;
+        redPRow := OrderedSet{#one,#two,#three}->asSequence();
+        whitePRow := OrderedSet{#six,#seven,#eight}-> asSequence();
+        columns := board.getOrderedColumns()->asSequence();
+        if  colour = #Red 
+        then
+            for r in redPRow do 
+                for c in columns do
+                    if board.squares->exists(x| x.row = r and x.column = c and x.shade = Shade::Red and x.pieceInSquare -> size() = 0) then
+                            piece := new Piece();
+                            piece.colour := #Red;
+                            piece.patternType := #OneOrTwoSquareDiagonallyForward;
+                            mp := new MovePattern();
+                            mp.patternType := #OneOrTwoSquareDiagonallyForward;
+                            for s in board.squares -> select(x|x.row = r and x.column = c and x.shade = Shade::Red)->asSequence() do
+                            insert(s,piece) into pieceLocation
+                            end;
+                            insert(self,piece) into gamePieces;
+                            insert (piece,mp) into movesLike;
+                    end;
+                    
+                    --insert(board.squares -> select(x|x.row = r and x.column = c and x.shade = Shade::Red)->asOrderedSet()->at(1),piece) into pieceLocation;
+                    --insert(self,piece) into gamePieces;
+                end;       
+            end;
+        else
+            for r in whitePRow do 
+                for c in columns do
+ 
+                    if board.squares->exists(x| x.row = r and x.column = c and x.shade = Shade::Red and x.pieceInSquare -> size() = 0) then
+                            piece := new Piece();
+                            piece.colour := #White;
+                            --piece.MovePattern; what was i trying to do here
+                            mp := new MovePattern();
+                            mp.patternType := #OneOrTwoSquareDiagonallyForward;
+                            for s in board.squares -> select(x|x.row = r and x.column = c and x.shade = Shade::Red)->asSequence() do
+                            insert(s,piece) into pieceLocation;
+                            end;
+                            insert(self,piece) into gamePieces;
+                    end;                    
+                    --insert(board.squares -> select(x|x.row = r and x.column = c and x.shade = Shade::White)->asOrderedSet()->at(1),piece) into pieceLocation;
+                    --insert(self,piece) into gamePieces;
+                end;       
+            end;
+        end;
+    end
+
+    --movePiece(board:Board,colour:Colour,piece:Piece)
+    --begin
+     --   if board.squares -> exists(x| x.row = row and x.column and x.pieceInSquare -> size() = 1 and x.pieceInSquare.colour = colour) then
+      --      if colour = #Red 
+    
+    --end
+
+end
+
+class LeaderBoard < Observer
+end
+
+class Record 
+attributes
+    record : Integer derived = users.result->select(x| x.isWinner = true)->size() - users.result -> select(x| x.match.gameStatus = GameStatus::Finished and x.match.Draw = false and x.isWinner = false) -> size()
+    
+end
+class Request
+attributes
+    requestStatus: RequestStatus init: RequestStatus::AwaitingResponse 
+    date: DateTime
+end
+
+class Blocked
+attributes
+    isBlocked: Boolean init:false
+end
+
+class Preference
+attributes 
+   preferences: Tuple(searchPreference: SearchPreference,userStatus: UserStatus) init: Tuple{searchPreference: SearchPreference::Everyone,userStatus: UserStatus::Available}
+   operations
+    updateStatus(searchPref: SearchPreference,uStatus: UserStatus)
+    begin
+        self.preferences := Tuple{searchPreference : searchPref, userStatus : uStatus};
+    end
+
+    
+    pre StatusIsNotNull: uStatus <> null and searchPref<> null
+    pre StatusIsNotTheSame: self.preferences.userStatus <> uStatus or self.preferences.searchPreference <> searchPref
+    
+    post ANewStatusIsCreated:  if uStatus <> self.preferences.userStatus@pre then
+        self.preferences.userStatus = uStatus else self.preferences.userStatus = self.preferences.userStatus@pre
+        endif
+
+    post:if searchPref <> self.preferences.searchPreference@pre then
+        self.preferences.searchPreference = searchPref else self.preferences.searchPreference = self.preferences.searchPreference@pre
+        endif
+    post: preferences@pre <> preferences
+end
+
+class RandomMatch
+attributes
+ searchQueueSeconds: Integer init: 15
+ regionMatchFound: Boolean init:false
+ searchProgress:SearchProgress init: SearchProgress::Ongoing
+end
+
+class GameInvite
+attributes 
+    inviteStatus: InviteStatus init: InviteStatus::AwaitingResponse 
+    Timer: Integer
+
+    operations 
+        initialiseInvite(recipiant:User,sender:User)
+            begin
+            self.inviteStatus := #AwaitingResponse;
+            self.Timer := 0;
+
+            insert (recipiant,self) into sendGameInvite;
+            insert (sender,self) into receiveGameInvite;
+            end
+
+        setStatus(response:Boolean)
+            begin
+                self.inviteStatus := #Accepted
+            end
+        
+        
+        initialiseGame()
+        begin
+        declare game:Game, res:Result, nres:Result; 
+        game := new Game();
+        res := new Result() between (self.inviteSender,game);
+        nres := new Result() between (self.inviteRecipiant,game);
+        game.gameStatus := #Started;
+        game.timer := 0;
+        game.Draw := false;
+        res.player := #Red;
+        nres.player := #White;
+        res.isWinner := false;
+        nres.isWinner := false;
+        res.quitGame := false;
+        nres.quitGame := false;
+        end
+
+        pre InviteMustBeAccepted: inviteStatus = #Accepted
+        pre BothPlayersMustBeValidUsers: inviteRecipiant <> null and inviteSender<>null
+        --post AGameExists: game<>null 
+        --post AnActiveGameHasBeenCreatedBetweenTheTwoPlayer: game.users->includesAll(Set{inviteSender,inviteRecipiant}) and game.gameStatus = #Started
+        --post GameInviteMustHaveOnlyOneCreatedGame: game -> size() = 1
+        --post GameMustBeBetweenTwoPlayers: game.users -> size() = 2
+        --post AllGameResultsAreFalse : game.result -> forAll(x| x.isWinner = false and x.quitGame = false) and game.Draw = false
+        --post GameHasAStartedStatus : game.gameStatus = #Started
+
+end
+
+class Rounds
+attributes  
+    numberOfMatches: Integer init:8
+end
+
+
+class CheckersBlitz 
+attributes
+operations
+    userRegistration(name:String,age:Integer,regionId: RegionIdentity,password:String,username:String,email:String)
+    begin
+        declare user : User,region: Region,pref: Preference;
+
+        user := new User();
+        region := new Region();
+        pref := new Preference();
+                
+        user.name := name;
+        user.age := age;
+        user.password := password;
+        user.userName := username;
+        user.email := email;
+        insert (user,pref) into sets;
+        insert (user,region) into regionSelect;
+        user.region.identity := regionId;
+
+        insert (self,user) into joins;
+
+    end
+
+
+
+    pre PasswordIsValid: password.size()>11
+
+    pre AgeIsAbove12: age>11
+
+    pre RegionSelectedIsValid: Set{#NA,#SA,#ASIA,#EUROPE,#OCEANIA,#CA,#AFRICA}->includes(regionId)
+
+    post UserWithTheseCredentialsExist: self.user -> select(v| v.userName = username and v.email = email and v.name = name and v.age = age and v.region.identity = regionId) -> size() = 1
+
+    UserSearch(userName: String): User =
+        if user -> select(x|x.userName = userName) -> size() > 0
+            then
+            user -> select(x|x.userName = userName) -> asOrderedSet() -> at(1)
+        else
+            null
+        endif
+  
+end
+
+
+class Region
+attributes
+    identity:RegionIdentity init: RegionIdentity::NA
+end
+
+class Tournament 
+attributes 
+ nbrOfPlayers: Integer init:30
+ nbrOfMatches: Integer init:15
+ status: TournamentStatus init: TournamentStatus::Intialized
+ winner: String derived: ''
+end
+
+class Piece
+ attributes
+    colour: Colour
+    patternType: Pattern
+ operations
+    getPieceRow(): Row = 
+        self.currentPlaceOnBoard.row
+    getPieceColumn(): Column = 
+        self.currentPlaceOnBoard.column
+    isKing(piece:Piece): Boolean = 
+        if king-> size() = 0 then
+            false
+        else
+            true
+        endif
+
+    playGame()
+        begin
+        declare rowStr:String,colStr:String,pPattern:MovePattern,possMoves:OrderedSet(Tuple(toRow:Row,toColumn:Column)),idx:String,move:String;
+        pPattern := new MovePattern();
+        possMoves := OrderedSet{};
+        
+        WriteLine('Hello'+ ' World');
+        if not self.isKing(self) then
+            pPattern := self.pattern->select(x|x.patternType = #OneOrTwoSquareDiagonallyForward)-> asSequence() -> at(1);
+
+            possMoves := pPattern.possibleMoves(self.currentPlaceOnBoard,self);
+            for x in possMoves do
+                rowStr := self.currentPlaceOnBoard.board.getRowName(x.toRow);
+                colStr := self.currentPlaceOnBoard.board.getColumnName(x.toColumn);
+                idx := possMoves -> indexOf(x).toString();
+                WriteLine(idx+'. Row: '+ rowStr + ' Column: ' + colStr);
+                Write('Enter The Move To Be Played: ')
+                move := ReadLine().toInteger()
+            end;
+        end;
+
+            
+        end
+
+
+
+
+
+
+
+    
+end
+
+class Observer
+end
+
+class Subject
+end
+
+class King < Piece
+end
+
+class MovePattern 
+    attributes 
+        patternType: Pattern
+    operations
+
+    getRowIndex(currSquare:Square): Integer begin 
+        result := OrderedSet{#one,#two,#three,#four,#five,#six,#seven,#eight}->indexOf(currSquare.row)
+    end
+    getColumnIndex(currSquare:Square): Integer begin
+        result := OrderedSet{#a, #b, #c, #d, #e, #f, #g, #h}->indexOf(currSquare.column)
+    end
+    possibleMoves(fr:Square, piece:Piece) : OrderedSet(Tuple(toRow:Row,toColumn:Column)) begin
+        
+        declare ridx:Integer,cidx:Integer,oneDiagonallyFwdMoves:Sequence(Integer),
+        twoDiagonallyFwdMoves:Sequence(Integer),
+        possMoves:OrderedSet(Tuple(toRow:Row,toColumn:Column)),
+        singleRow:Integer;
+        
+        oneDiagonallyFwdMoves := Sequence{};
+        twoDiagonallyFwdMoves := Sequence{};
+        
+        possMoves := OrderedSet{};
+        
+        ridx := OrderedSet{#one,#two,#three,#four,#five,#six,#seven,#eight}->indexOf(fr.row);
+        cidx := OrderedSet{#a, #b, #c, #d, #e, #f, #g, #h}->indexOf(fr.column);
+
+        WriteLine(' ' +piece.currentPlaceOnBoard.board.getRowName(#one));
+        if (piece.patternType = #OneOrTwoSquareDiagonallyForward and piece.colour = #Red) or piece.king -> size() = 1 then
+            
+            if self.validRowHelper(ridx + 1) then
+                WriteLine ('There Is a Valid Row For A Red Piece');
+                
+                oneDiagonallyFwdMoves := OrderedSet{cidx + 1 , cidx - 1} -> select(x| self.validColumnHelper(x)) -> asSequence();
+    
+                for x in oneDiagonallyFwdMoves do 
+                    possMoves:= possMoves->append(Tuple{toRow:piece.currentPlaceOnBoard.board.getOrderedRows()->at(ridx + 1),toColumn:piece.currentPlaceOnBoard.board.getOrderedColumns()->at(x)})
+                end;
+            end;
+            if self.validRowHelper(ridx + 2) then
+                
+                twoDiagonallyFwdMoves := OrderedSet{cidx + 2 , cidx - 2} -> select(x| self.validColumnHelper(x)) -> asSequence();
+                
+                for x in twoDiagonallyFwdMoves do 
+                    possMoves:= possMoves ->append(Tuple{toRow:piece.currentPlaceOnBoard.board.getOrderedRows()->at(ridx +2 ),toColumn:piece.currentPlaceOnBoard.board.getOrderedColumns()->at(x)})
+                end;
+            end;
+        end;
+        if (piece.patternType = #OneOrTwoSquareDiagonallyForward and piece.colour = #White) or piece.king -> size() = 1 then
+            
+            if self.validRowHelper(ridx - 1) then
+                
+                oneDiagonallyFwdMoves := OrderedSet{cidx + 1 , cidx - 1} -> select(x| self.validColumnHelper(x)) -> asSequence();
+    
+                for x in oneDiagonallyFwdMoves do 
+                    possMoves:= possMoves->append(Tuple{toRow:piece.currentPlaceOnBoard.board.getOrderedRows()->at(ridx - 1),toColumn:piece.currentPlaceOnBoard.board.getOrderedColumns()->at(x)})
+                end;
+            end;
+            if self.validRowHelper(ridx - 2) then
+                
+                twoDiagonallyFwdMoves := OrderedSet{cidx + 2 , cidx - 2} -> select(x| self.validColumnHelper(x)) -> asSequence();
+                
+                for x in twoDiagonallyFwdMoves do 
+                    possMoves:= possMoves ->append(Tuple{toRow:piece.currentPlaceOnBoard.board.getOrderedRows()->at(ridx -2 ),toColumn:piece.currentPlaceOnBoard.board.getOrderedColumns()->at(x)})
+                end;
+            end;
+        end;
+        if possMoves -> size() = 0 then
+            WriteLine('There are no possible Moves')
+        else
+            WriteLine('There are moves available')
+        end;
+        
+        result := possMoves
+        
+    end
+
+    validRowHelper(rowIndex: Integer): Boolean =
+        if rowIndex > 8 or rowIndex < 1 then
+            false
+        else
+            true
+        endif
+    validColumnHelper(columnIndex: Integer ): Boolean =
+        if columnIndex > 8 or columnIndex < 1 then
+            false
+        else
+            true
+        endif
+   
+
+
+
+
+
+
+
+
+end
+
+association RecordUpdate
+    between 
+    User[1] role users
+    Record[1] role record
+end
+
+class Square
+   attributes
+    shade:Shade
+    column: Column
+    row: Row
+
+    operations
+    	getSquareName(): String =
+		board.getColumnName(column) + board.getRowName(row)
+end
+
+class Move
+end
+
+class Board 
+operations
+
+    getOrderedRows(): OrderedSet(Row) = OrderedSet{
+        #one,#two,#three,#four,#five,#six,#seven,#eight
+    }
+
+    getOrderedColumns(): OrderedSet(Column) = OrderedSet{
+        #a, #b, #c, #d, #e, #f, #g, #h
+        }
+
+
+    getRowName(r: Row): String =
+        let
+            names = OrderedSet{'1', '2', '3', '4', '5', '6', '7', '8'}
+        in
+            names->at(getOrderedRows()->indexOf(r))
+
+    getColumnName(c: Column): String = 
+        let
+            names = OrderedSet{'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'}
+		in
+            names->at(getOrderedColumns()->indexOf(c))
+    
+
+    
+
+
+    printBlankBoardShades()
+    begin
+        declare
+            square: Square,
+            str: String;
+         WriteLine('\nThe Blank CheckersBoard - Shades');
+         for r in self.getOrderedRows()->reverse()->asSequence() do
+            WriteLine('-------------------------');
+            Write('|');
+            for f in self.getOrderedColumns()->asSequence() do
+				square := self.squares.select(
+					s | s.row =r and s.column = f)->any(true);
+				if square.shade = Shade::Red
+				then str := 'R'
+				else str := 'W'
+				end;
+				Write(str + ' |');
+            end;
+            WriteLine('');
+        end;
+        WriteLine('-------------------------\n');
+    end
+
+    printBlankBoardSquares()
+    begin
+        declare
+            square: Square,
+            str: String;
+            WriteLine('\nThe Blank Chessboard - Squares');
+            for r in self.getOrderedRows()->reverse()->asSequence() do
+                WriteLine('-------------------------');
+                Write('|');
+                for c in self.getOrderedColumns()->asSequence() do
+    				square := self.squares.select(
+    					s | s.row =r and s.column = c)->any(true);
+    				Write(square.getSquareName() + '|');
+                end;
+                WriteLine('');
+            end;
+            WriteLine('-------------------------\n');
+        end
+    
+    printBoard()
+    begin
+        declare
+            piece: Piece,
+            str: String;
+
+        WriteLine('\n  Checkers Blitz');
+        for r in self.getOrderedRows()->reverse()->asSequence() do
+            WriteLine('-------------------------');
+            Write('|');
+            for c in self.getOrderedColumns()->asSequence() do
+                piece := self.squares.select(
+                    s | s.row =r and s.column = c)->any(true).pieceInSquare;
+                    if piece.colour = #Red and piece.king->size()=0
+                    then
+                    str := 'rP'
+                    else
+                        if piece.colour = #White and piece.king->size()=0
+                        then
+                        str := 'wP'
+                        else
+                            if piece.colour = #Red and piece.king->size()=1
+                            then
+                            str := 'rKp'
+                            else
+                                if piece.colour = #White and piece.king->size()=1
+                                then
+                                str := 'wKp'
+                                else
+                                str:= '  '
+                                end;
+                            end;
+                        end;
+                    end;    
+            Write(str + '|');
+           end;
+           WriteLine('');
+           
+        end;
+        WriteLine('-------------------------\n');
+        
+    end
+
+end 
+
+associationclass Result 
+    between
+    User[2] role users 
+    Game[*] role match ordered 
+    attributes
+        player:Colour
+        isWinner:Boolean
+        quitGame:Boolean
+end
+
+association UserArrangement
+    between 
+    LeaderBoard[1] role leaderboard
+    Record[*] role userRecord ordered
+end
+
+enum RequestStatus{
+    Accepted,
+    Rejected,
+    AwaitingResponse
+}
+
+enum SearchPreference{
+    Everyone,
+    Friends,
+    FriendsOfFriends
+}
+
+enum RegionIdentity{
+    NA,SA,ASIA,EUROPE,OCEANIA,CA,AFRICA
+}
+
+enum Colour{
+    Red,
+    White
+}
+
+enum InviteStatus{
+    Accepted,
+    Rejected,
+    AwaitingResponse
+}
+
+enum Shade{
+    Red,
+    White
+}
+enum GameStatus{
+    Ongoing,
+    Started,
+    Finished
+}
+enum SearchProgress{
+    Found,
+    Ongoing,
+    Ended
+}
+
+enum TournamentStatus{
+    Ongoing,
+    Intialized,
+    Finished
+}
+
+enum GameResult{
+    Win /* User has won */,
+    Lose /* User has Lost*/,
+    Draw /* User Draw */
+}
+
+enum UserTitle{
+    Beginner,
+    Novice,
+    Intermediate,
+    Master,
+    GrandMaster
+}
+
+
+enum UserStatus{
+    Available,
+    FriendsOnly,
+    DoNotDisturb
+}
+
+enum Pattern{
+    OneOrTwoSquareDiagonallyForward,
+    OneOrTwoSquareDiagonallyForwardOrBackward
+}
+
+enum Row{
+    one,two,three,four,five,six,seven,eight
+}
+
+enum Column{
+    a,b,c,d,e,f,g,h
+}
+
+
+association sets
+    between 
+    User[1] role user 
+    Preference[*] role status
+end
+
+
+aggregation has
+    between 
+    Board[1] role board
+    Square[64] role squares
+end
+
+association pieceLocation
+    between
+    Square[0..1] role currentPlaceOnBoard
+    Piece[0..1] role pieceInSquare
+end
+
+aggregation initialise
+    between
+    Game[1] role game
+    Board[1] role board
+end
+
+association joins
+    between
+    CheckersBlitz[1] role CB
+    User[*] role user
+end
+
+aggregation gamePieces
+    between 
+    Game[1] role game
+    Piece[1..24] role pieces
+end
+
+
+association promotedTo
+    between
+    Piece[0..1] role piece
+    King[0..1] role king
+end
+
+association movesLike
+    between 
+    Piece[*] role piece
+    MovePattern[1..*] role pattern
+end
+
+association pieceMoved
+    between 
+    Piece[1] role piece
+    Move[*] role pMoves ordered
+end
+
+association moveCaptured
+    between 
+    Move[1] role onMove
+    Piece[*] role capturedPiece
+end
+
+association GameMoves
+    between
+    Game[1] role game
+    Move[*] role moves ordered
+end
+
+association MoveTo
+    between
+    Move[*] role moves
+    Square[1..*] role destinationSquare ordered
+end
+
+association sends
+    between
+    User[1] role sender
+    Request[*] role sentRequest
+end
+
+association respondsTo
+    between
+    User[1] role receiver
+    Request[*] role recievedRequest
+end
+
+association updatesBlockedStatus
+    between
+    User[1] role blocker
+    Blocked[*] role updatedBlockStatus
+end
+
+association recievesBStausUpdate
+    between
+    User[1] role blocked
+    Blocked[*] role newBlockStatus
+end
+
+association observes
+    between
+    Observer[*] role observer
+    Subject[*] role subject
+end
+
+association chnageBlockStatusTo
+    between
+    Blocked[1] role currStatus
+    Blocked[0..1] role newStatus
+end
+
+
+
+association sendGameInvite
+between
+    User[1] role inviteSender
+    GameInvite[*] role sentInvite ordered
+end
+
+association receiveGameInvite
+between
+    User[1] role inviteRecipiant
+    GameInvite[*] role receivedInvite ordered
+end
+
+association createsInvitedgame
+between 
+ GameInvite[0..1] role acceptedInvite 
+ Game[1] role game
+end
+
+association requestRMatch
+between
+ User[1..*] role userRMrequest
+ RandomMatch[*] role MatchSearch
+end
+
+association promotedOn
+between
+    King[0..1] role king
+    Move[1] role move
+end
+
+association createRMatch
+between 
+    RandomMatch[0..1]
+    Game[1] role RandomGame
+end 
+
+association changesTo
+between
+    Preference[1] role currStatus
+    Preference[0..1] role newStatus
+end
+
+association RandomSelects
+between 
+    RandomMatch[*] role foundMatchUp
+    User[2] role selectedUser
+end
+
+association joinTournament
+between 
+    User[0..16]
+    Tournament[*]
+end
+
+association regionSelect
+    between
+    User[*] role joinedUser
+    Region[1] role region
+end
+
+association Regionchanged
+    between
+    Region[1] role currRegion
+    Region[0..1] role newRegion
+end
+
+aggregation roundGames
+    between
+    Rounds[0..1] role round
+    Game[1..8] role games 
+end
+
+aggregation tournamentRounds
+    between 
+    Tournament [1] role tournament
+    Rounds [4] role rounds ordered
+end
+    
+
+
+
+
+/* ----------------------------------------------------------------------
+    CONSTRAINTS
+---------------------------------------------------------------------- */
+constraints 
+
+context User 
+    inv BlockedUsersCannotBeAcceptedAsFriends:
+    updatedBlockStatus -> forAll(a | 
+        a.isBlocked = true implies( 
+            recievedRequest -> select(z| z.requestStatus = RequestStatus::Accepted) -> excludesAll(a.blocked.sentRequest->select(x|x.receiver = self))
+            )
+        )
+    inv CannotBlockYourself:
+        updatedBlockStatus-> forAll(a |
+            a.isBlocked = true implies(
+                a.blocked <> self
+            )
+        )
+    inv CannotSendRequestToSelf:
+        sentRequest -> forAll(a|
+            a.receiver<>self
+            )
+    inv passwordGreater:
+        self.password.size()>11
+    inv AgeOver12:
+        self.age > 11 
+    inv  CannotBeApartOfYourOwnFriendsList:
+        recievedRequest->select(x|x.requestStatus = RequestStatus::Accepted) -> forAll(z| z.sender-> excludes(self))
+    inv max7500Friends:
+         sentRequest -> collect(sR | sR.requestStatus = RequestStatus::Accepted) -> size() < 7501
+
+    inv CannotSendFriendRequestWithAPendingRequest:
+        sentRequest.receiver -> forAll( x | sentRequest -> collect(
+            O | O.requestStatus = RequestStatus::AwaitingResponse and O.receiver = x) -> size() = 1
+        )
+    inv CannotSendFriendRequestToFriends:
+        sentRequest -> forAll(x | x.requestStatus = RequestStatus::AwaitingResponse implies 
+        sentRequest -> select(c|c.requestStatus = RequestStatus::Accepted) -> forAll(z| z.receiver <> x.receiver))
+        
+    inv CannotSendGameInviteToUserInGame:
+        sentInvite -> forAll(x| x.inviteStatus = InviteStatus::AwaitingResponse implies
+        x.inviteRecipiant.match -> forAll(g| g.gameStatus = GameStatus::Finished))
+    inv CantSearchForMatchWhileInMatch:
+        MatchSearch -> forAll(
+            x| x.searchProgress = SearchProgress::Ongoing implies match -> collect(
+                x| x.gameStatus = GameStatus::Ongoing) -> size() = 0)
+    inv CannotSendFriendRequestWhenBlocked:
+        sentRequest ->forAll(v | v.requestStatus = RequestStatus::AwaitingResponse 
+            implies 
+                v.receiver.updatedBlockStatus -> select( 
+                    x|x.isBlocked = true) ->forAll (z| z.blocked<>self)
+            ) 
+    inv OnlyCanHaveOneOngoingRandomSearch:
+        MatchSearch -> collect(z| z.searchProgress = SearchProgress::Ongoing) -> size() >2
+
+    inv CannotBeRandomlyMatchedUpWithBlockedUser:
+        let blockedUsers = updatedBlockStatus -> select(
+            x| x.isBlocked = true) in
+        MatchSearch -> forAll(
+             z| blockedUsers.blocked -> excludesAll(
+                z.selectedUser)
+                )
+    inv UserLosesWhenTheyQuitTheGame:
+        result -> forAll(x| x.quitGame = true implies
+        x.match.gameStatus = GameStatus::Finished and x.isWinner = false)
+    
+
+context CheckersBlitz
+    inv UniqueUserNames:
+        user -> forAll(a,b|
+            a.userName<>b.userName
+            )
+
+    inv UniqueEmails:
+        user -> forAll(i | let emails = user -> collect(y|
+            y.email = i.email) in
+                emails->size()=1)
+    
+
+context Game
+    inv AtMostOneWinner:
+    result -> collect (x| x.isWinner = true)-> size() < 2
+    inv MatchCantBeDrawnAndWon:
+    self.gameStatus = GameStatus::Finished and self.Draw = true implies result -> collect(
+        x| x.isWinner = true) -> size() = 0
+    inv ThereMustBe12RedPiecesOnTheBoardAtStart:
+        moves -> size() = 0 and (self.gameStatus = GameStatus::Started) implies 
+        pieces -> collect(x| x.colour=Colour::Red) -> size() = 12
+    inv ThereMustBe12WhitePiecesOnTheBoardAtStart:
+        moves -> size() = 0 and (self.gameStatus = GameStatus::Started) implies 
+        pieces -> collect(x| x.colour=Colour::White) -> size() = 12
+    inv CapturedPieceNotOnBoard:
+        moves.capturedPiece.currentPlaceOnBoard -> collect(x | x) -> size= 0
+    inv GameMovesContainsAllTheMovesOfPiecesInGame:
+        pieces -> forAll(x| moves -> includesAll(x.pMoves))
+    inv PieceMustBeApartOfTheGame:
+        moves -> forAll(c| pieces -> includes(c.piece))
+    inv RedPiecesSetUpAtStart:
+        let redStartingRows = OrderedSet{Row::one,Row::two,Row::three} in
+        let redRows = board.squares -> select(Rsquares | redStartingRows -> includes(Rsquares.row) and Rsquares.shade = Shade::Red) in
+        moves -> size() = 0 and self.gameStatus = GameStatus::Started implies 
+                redRows -> forAll(x| x.pieceInSquare -> size() = 1 and x.pieceInSquare.colour = Colour::Red )
+    inv WhitePiecesSetUpAtStart:
+        let whiteStartingRows = OrderedSet{Row::six,Row::seven,Row::eight} in
+        let whiteRows = board.squares -> select(Wsquares | whiteStartingRows -> includes(Wsquares.row) and Wsquares.shade = Shade::Red) in
+        moves -> size() = 0 and self.gameStatus = GameStatus::Started implies 
+                whiteRows -> forAll(x| x.pieceInSquare -> size() = 1 and x.pieceInSquare.colour = Colour::White )
+    inv MovesMustAlternatesBetweenColors:
+       moves -> forAll(x,y| x.capturedPiece -> size() = 0 implies
+           x.piece.colour <> y.piece.colour)
+    inv WhenRedWinsByClearingBoard:
+        pieces-> collect(x| x.colour = Colour::White)-> size() = 0  and self.Draw = false implies 
+            result -> select(z| z.player=Colour::Red and z.isWinner = true) -> size() = 1
+    inv WhenWhiteWinsByClearingBoard:
+        pieces-> collect(x| x.colour = Colour::Red)-> size() = 0 implies self.Draw = false implies
+            result -> select(z| z.player= Colour::White and z.isWinner = true) -> size() = 1
+    
+    inv WhenWhiteHasNoPlaceToMoveOnBoard:
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        let whiteP = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let whitePK = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        let redP = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let redPK = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        whiteP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-2)))-> forAll(x| x.pieceInSquare -> size() > 0)) and 
+
+        whitePK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0)) 
+           implies
+        redP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> exists(x| x.pieceInSquare -> size() = 0)) or 
+
+        redPK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> exists(x| x.pieceInSquare -> size() = 0)) 
+           implies
+
+        result -> collect(x | x.player= Colour::Red and x.isWinner = true) -> size() = 1
+
+       inv WhenRedHasNoPlaceToMoveOnBoard:
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        let whiteP = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let whitePK = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        let redP = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let redPK = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        redP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0)) and 
+
+        redPK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0)) 
+           implies
+        whiteP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-2)))-> exists(x| x.pieceInSquare -> size() = 0)) or 
+
+        whitePK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> exists(x| x.pieceInSquare -> size() = 0)) 
+           implies
+
+        result -> collect(x | x.player= Colour::White and x.isWinner = true) -> size() = 1
+    
+
+        inv WhenNoOneHasNoPlaceToMoveOnBoard:
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        let whiteP = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let whitePK = pieces -> select(x| x.colour = Colour::White and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        let redP = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x<>x.king) in
+        let redPK = pieces -> select(x| x.colour = Colour::Red and x.currentPlaceOnBoard-> size() =  1 and x=x.king) in
+        round -> size() = 0 and (randomMatch-> size() = 1 or acceptedInvite -> size() = 1) implies
+        redP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0)) and 
+
+        redPK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0)) 
+           and
+        whiteP -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+         
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-1)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) and (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) or f.column = sColumn -> at(sColumn -> indexOf(f.column)-2)
+         
+           and f.row = sRow -> at(sRow -> indexOf(f.row)-2)))-> forAll(x| x.pieceInSquare -> size() > 0)) and 
+
+        whitePK -> select(z|  z.currentPlaceOnBoard->size() = 1) -> forAll (x| board.squares->select(
+          
+           f| (f.column = sColumn -> at(sColumn -> indexOf(f.column)+1) and  f.row = sRow -> at(sRow -> indexOf(f.row)+1))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-1) and f.row = sRow -> at(sRow -> indexOf(f.row)-1)) or (f.column = sColumn -> at(sColumn -> indexOf(f.column)+2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2 ))
+          
+           or (f.column = sColumn -> at(sColumn -> indexOf(f.column)-2) and f.row = sRow -> at(sRow -> indexOf(f.row)+2)))-> forAll(x| x.pieceInSquare -> size() > 0))
+           implies
+
+        result -> collect(x | x.isWinner = false) -> size() = 2 and self.Draw = true
+
+        inv TimeRunsOutOutsideOfTournamentMatchIsDrawn:
+            round -> size() = 0 and (randomMatch-> size() = 1 or acceptedInvite -> size() = 1) and timer = 15  and 
+            pieces->collect(x|x.colour= Colour::Red and x.king->size() = 1) ->size() =  pieces->collect(x|x.colour= Colour::White and x.king->size() = 1) ->size()
+            implies self.Draw = true 
+
+        inv TimeRunsOutInTournamentAndRedHasMostKings:
+            
+            let redP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+            let whiteP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+
+            round -> size() > 0 and timer = 15 and redP > whiteP implies
+            
+            result -> collect(f| f.player = Colour::Red and f.isWinner = true) -> size() = 1
+        inv TimeRunsOutInTournamentAndWhiteHasMostKings:
+            
+            let redP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+            let whiteP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+
+            round -> size() > 0 and timer = 15 and redP < whiteP implies
+            
+            result -> collect(f| f.player = Colour::White and f.isWinner = true) -> size() = 1
+
+        inv TimeRunsOutInTournamentAndBothPiecesHasEqualAmountOfKings:
+            
+            let redP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+            let whiteP = pieces -> collect(x| x.king -> size() = 1 and x.colour=Colour::Red)->size() in
+            let lastPiece  = moves -> select(x|x.capturedPiece->size()>0)->last().capturedPiece -> collect(x|x)->asOrderedSet()-> last().colour in 
+
+            round -> size() > 0 and timer = 15 and redP = whiteP implies
+
+            result -> collect(f| f.player <> lastPiece and f.isWinner = true) -> size() = 1
+        
+        inv canOnlyBeARadomGameForOneModeAtAtATime:
+            randomMatch -> size() = 1 implies
+            acceptedInvite ->size() = 0 and round ->size() = 0
+        
+        inv canOnlyBeAInvitedGameForOneModeAtAtATime:
+            acceptedInvite-> size() = 1 implies
+            randomMatch ->size() = 0 and round ->size() = 0
+        
+        inv canOnlyBeATournamentGameForOneModeAtAtATime:
+            round-> size() > 0 implies
+            randomMatch ->size() = 0 and round ->size() = 0
+        
+        
+
+            
+
+            
+            
+            
+
+context Tournament
+    inv TournamentGamesCannotBeDrawn:
+    rounds.games->forAll(x| x.Draw = false)
+
+    inv TournamentEndsWhenWinnerisFound:
+    self.status = TournamentStatus::Finished implies user -> collect(
+        x|x.userName)->includes(
+            self.winner)
+
+    
+context Board
+    inv NoTwoSquaresHaveTheSameRowAndColumn: 
+    squares -> forAll(a,b| a<>b implies(
+        a.row <> b.row and a.column<>b.column))
+    inv ExactlyOneRowAndColumnForEachSquare:
+    
+    let sRow  = Set{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+    let sColumn = Set{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+
+    sRow -> forAll( k| 
+    sColumn -> forAll(m| squares -> select(s| 
+        s.row = k and s.column = m) -> size() = 1
+        )
+        )
+
+context Move
+    inv SquareExistsThatPieceIsMovingOnto:
+    let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+    let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+    destinationSquare -> forAll(x| sRow -> includes(x.row) and sColumn -> includes(x.column))
+
+
+
+
+
+context Piece
+    inv CannotCapturePieceOfSameColour:
+        pMoves.capturedPiece-> forAll(x| x.colour<>self.colour)
+    inv CapturedPieceCannotBePromotedPiece:
+        king -> size() = 1 implies self.currentPlaceOnBoard -> size() = 1
+    inv aPieceThatIsNotAKingOnlyMovesDiagonally:
+        king -> size() = 0 implies pattern-> forAll(x| x.patternType = Pattern::OneOrTwoSquareDiagonallyForward )
+    inv squareMustBeEmptyBeforeMoving:
+        pMoves -> forAll(x| x.destinationSquare -> forAll (c| c.pieceInSquare -> size() = 0))  
+    inv RedPieceMustMoveUpOneRowAndToAColumnToTheLeftOrRightDiagonally:
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        pMoves -> forAll(x| x.capturedPiece -> size() = 0) and self <> king and self.colour = Colour::Red implies 
+        pMoves -> forAll(x,y| sRow -> indexOf(y.destinationSquare->last().row) = sRow ->indexOf(x.destinationSquare->last().row)+1 and 
+          (sColumn -> indexOf(y.destinationSquare->last().column) = sColumn -> indexOf(x.destinationSquare->last().column) + 1 or
+          sColumn -> indexOf(y.destinationSquare->last().column) = sColumn -> indexOf(x.destinationSquare->last().column) - 1))
+    inv WhitePieceMustMoveDownOneRowAndToAColumnLeftOrRightDiagonally:
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        pMoves -> forAll(x| x.capturedPiece -> size() = 0) and self <> king and self.colour = Colour::White implies 
+        pMoves -> forAll(x,y| sRow -> indexOf(y.destinationSquare->last().row) = sRow ->indexOf(x.destinationSquare->last().row)-1 and 
+          (sColumn -> indexOf(y.destinationSquare->last().column) = sColumn -> indexOf(x.destinationSquare->last().column) + 1 or
+          sColumn -> indexOf(y.destinationSquare->last().column) = sColumn -> indexOf(x.destinationSquare->last().column) - 1))
+    inv RedPieceBecomesKingWhenItHasBeenAtTheEndOfTheBoard:
+        self = king implies
+        pMoves -> collect(x| x.destinationSquare -> forAll(z|z.row = Row::eight) ) -> notEmpty()
+    inv WhitePieceBecomesKingWhenItHasBeenAtTheEndOfTheBoard:
+        self = king implies
+        pMoves -> collect(x| x.destinationSquare-> forAll(z|z.row = Row::one) ) -> notEmpty()
+    inv EmptySpaceBehindPieceBeingCapturedforRedOrKing:
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        
+        self=king or colour = Colour::Red implies
+        
+        pMoves -> forAll (x| x.capturedPiece -> size() > 0 implies
+            
+            x.capturedPiece->forAll(m| let capturedPieceLastSquare = m.pMoves -> last().destinationSquare->last() in
+            
+            x.destinationSquare -> exists(v| v.row =  sRow -> at(sRow -> indexOf(capturedPieceLastSquare.row)+1) and 
+                    
+                    (v.column = sColumn -> at(sColumn -> indexOf(capturedPieceLastSquare.column)-1) or 
+                    
+                    v.column = sColumn -> at(sColumn -> indexOf(capturedPieceLastSquare.column)+1) )  
+            
+            
+            )))
+        inv EmptySpaceBehindPieceBeingCapturedforWhiteOrKing:
+        let sRow  = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} in
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+        
+        self=king or colour = Colour::Red implies
+        
+        pMoves -> forAll (x| x.capturedPiece -> size() > 0 implies
+            
+            x.capturedPiece->forAll(m| let capturedPieceLastSquare = m.pMoves -> last().destinationSquare->last() in
+            
+            x.destinationSquare -> exists(v| v.row =  sRow -> at(sRow -> indexOf(capturedPieceLastSquare.row)-1) and 
+                    
+                    (v.column = sColumn -> at(sColumn -> indexOf(capturedPieceLastSquare.column)-1) or 
+                    
+                    v.column = sColumn -> at(sColumn -> indexOf(capturedPieceLastSquare.column)+1) )  
+            
+            
+            )))
+
+    
+        
+    
+    
+
+context Board
+    inv BottomLeftSquareIsRed:
+        squares -> forAll(x | x.row = Row::one and x.column = Column::a implies x.shade = Shade::Red)
+    inv AdjacentSquareWithSameRowDifferentShade:
+        let sColumn = OrderedSet{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} in
+
+        Set{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight} -> forAll(r| 
+        squares -> select(
+            s| s.row = r) -> forAll(
+                x,y| sColumn -> indexOf(x.column)+1 = sColumn -> indexOf(y.column) implies
+                    x.shade<>y.shade)
+        )
+    inv AdjacentSquareWithSameColumnDifferentShade:
+        let sRow = OrderedSet{Row::one,Row::two,Row::three,Row::four,Row::five,Row::six,Row::seven,Row::eight}in
+        
+        Set{Column::a,Column::b,Column::c,Column::d,Column::e,Column::f,Column::g,Column::h} -> forAll(r| 
+        squares -> select(
+            s| s.column = r) -> forAll(
+                x,y| sRow -> indexOf(x.row)+1 = sRow -> indexOf(y.row) implies
+                    x.shade<>y.shade)
+        )
+    inv ThereMustBe32RedSquare:
+        squares -> collect(x| x.shade=Shade::Red) -> size() = 32
+    inv ThereMustBe32WhiteSquares:
+        squares -> collect(x| x.shade=Shade::White) -> size() = 32
+
+        
+context Preference
+inv NewStatusAndOldStatusCannotBeTheSame:
+    self.newStatus -> size() = 1 implies
+        self <> newStatus
+
+context Request
+   inv receivercannotbeyourself: self.sender <> self.receiver
+
+context User
+    inv canBeApartOfOnlyOneActiveTournament:
+        tournament -> collect(x| x.status = TournamentStatus::Ongoing) -> size() = 1
+
+
+    
+context Tournament
+    inv NoDrawnGamesInTournament: 
+    
+    rounds.games->forAll(tg | tg.Draw = false)
+
+
+/*
+Execute the following lines to simulate the initialisation of a chess game
+
+reset
+
+!create CB:CheckersBlitz
+!CB.userRegistration('userA',14,#NA,'bigpasswordtouse','userA','userA@email.com')
+!CB.userRegistration('userB',15,#NA,'bigpasswordtouse','userB','userB@email.com')
+!User1.inviteToGame(User2)
+!User2.respondToGameInvite(GameInvite1,true)
+!GameInvite1.initialiseGame()
+!Game1.initialiseGame()
+!Board1.printBlankBoardShades()
+!Board1.printBlankBoardSquares()
+!Game1.createAndInsertPiece(Board1,#Red)
+!Game1.createAndInsertPiece(Board1,#White)
+!Board1.printBoard()
+!Piece10.playGame()
+
+
+
+
+check
+
+*/
